@@ -1,0 +1,98 @@
+=================================================CA=================================================
+-Generate CA private key
+openssl genrsa -des3 -out myCA.key 2048
+passphrase: thisismykey
+
+-Generate CA root cert from private key
+openssl req -x509 -new -nodes -key myCA.key -sha256 -days 1825 -out myCA.pem
+
+-Adding the Root Certificate to other Linux
+sudo apt-get install -y ca-certificates
+sudo cp ~/certs/myCA.pem /usr/local/share/ca-certificates/myCA.crt
+sudo update-ca-certificates
+
+=================================================CA=================================================
+
+===============================================Server===============================================
+-Generate ServerA private key
+openssl genrsa -out serverA.key 2048
+
+-Generate ServerA CSR to be signed by CA
+openssl req -new -key serverA.key -out serverA.csr
+-CN:servera
+-challenge pass: servera
+===============================================Server===============================================
+
+
+=================================================CA=================================================
+
+(Copy serverA.csr over to CA folder)
+
+-Generate ServerA cert using ServerA.csr, myCA.key and .pem cert.
+openssl x509 -req -in serverA.csr -CA myCA.pem -CAkey myCA.key -CAcreateserial -out serverA.crt -days 825 -sha256
+
+-ServerA can now run server with serverA.crt and serverA.key. serverA.csr can be deleted.
+
+=================================================CA=================================================
+
+
+===============================================Client===============================================
+
+-Replicate same steps for client CA and client "Server".
+-Client should have its own CA and own server cert.
+
+===============================================Client===============================================
+
+
+===============================================Server===============================================
+
+-Add myclientCA.pem to allClientCA.pem (this can contain many other CA) to be loaded in server NGINX
+-(Cert should already be in PEM format)
+-allClientCA.pem will be used to verify clientA.crt signature.
+
+===============================================Server===============================================
+
+===============================================Client===============================================
+
+-(Cert should already be in PEM format)
+
+-Add myCA.pem to trustedServerCA.pem
+-Add trustedServerCA.pem under proxy_pass to server NGINX. this will be used to verify serverA.crt signature.
+-Add ClientA.crt under proxy_pass to server NGINX. this cert will be presented to server
+
+===============================================Client===============================================
+
+
+================================================Test================================================
+-run both server and client using docker compose
+docker-compose up --build
+
+-curl from within client docker container
+docker exec -it clienta sh
+
+-curl without any cert. (should fail because cant validate serverA without serverA CA)
+curl https://serverA/test -v
+
+-curl with serverCA root cert. (should fail because does not provide clientA.crt)
+curl --cacert ./etc/ssl/trustedServerCA.pem https://serverA/test -v
+
+-curl with serverCA root cert + client cert (should be successful)
+curl --cert ./etc/ssl/clientA.crt --key ./etc/ssl/clientA.key --cacert ./etc/ssl/trustedServerCA.pem https://serverA/test -v
+================================================Test================================================
+
+
+================================================Test================================================
+
+In browser
+
+serverA : https://localhost:1443/test/
+clientA : https://localhost:2443/pass/
+
+browsing this should be forbidden
+https://localhost:1443/test/
+
+ClientA /pass/ is routed to serverA /test/ with relevant certs
+browsing this should be successful
+https://localhost:2443/pass/
+
+================================================Test================================================
